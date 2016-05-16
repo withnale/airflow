@@ -3377,6 +3377,13 @@ class Pool(Base):
     slots = Column(Integer, default=0)
     description = Column(Text)
 
+    def __init__(
+            self, pool=None, slots=None,
+            description=None):
+        self.pool = pool
+        self.slots = slots
+        self.description = description
+
     def __repr__(self):
         return self.pool
 

@@ -20,6 +20,8 @@ from __future__ import unicode_literals
 from functools import wraps
 import logging
 import os
+import io
+import yaml
 
 from alembic.config import Config
 from alembic import command
@@ -30,6 +32,7 @@ from sqlalchemy.pool import Pool
 
 from airflow import settings
 from airflow import configuration
+from airflow.exceptions import AirflowException
 
 
 def provide_session(func):
@@ -73,15 +76,18 @@ def pessimistic_connection_handling():
             raise exc.DisconnectionError()
         cursor.close()
 
-
 @provide_session
-def merge_conn(conn, session=None):
-    from airflow import models
-    C = models.Connection
-    if not session.query(C).filter(C.conn_id == conn.conn_id).first():
-        session.add(conn)
+def merge_db_object(match_dict, klass, attr, replace, session=None):
+    match_object = klass(**match_dict)
+    if not session.query(klass).filter(getattr(klass, attr) == getattr(match_object, attr)).first():
+        session.add(match_object)
         session.commit()
-
+    elif replace:
+        # TODO: How do you update the object in-place?
+        item = session.query(klass).filter(getattr(klass, attr) == getattr(match_object, attr)).first()
+        for key, value in match_dict.iteritems():
+            setattr(item, key, value)
+        session.commit()
 
 @event.listens_for(settings.engine, "connect")
 def connect(dbapi_connection, connection_record):
@@ -98,90 +104,35 @@ def checkout(dbapi_connection, connection_record, connection_proxy):
             "attempting to check out in pid {}".format(
             connection_record.info['pid'], pid))
 
+def initdb_from_yaml(config, klass, attr, replace):
+    for args in config:
+        merge_db_object(match_dict=args, klass=klass,
+                        attr=attr, replace=replace)
 
-def initdb():
+def initdb(replace=None):
     session = settings.Session()
 
     from airflow import models
     upgradedb()
 
-    merge_conn(
-        models.Connection(
-            conn_id='airflow_db', conn_type='mysql',
-            host='localhost', login='root', password='',
-            schema='airflow'))
-    merge_conn(
-        models.Connection(
-            conn_id='airflow_ci', conn_type='mysql',
-            host='localhost', login='root',
-            schema='airflow_ci'))
-    merge_conn(
-        models.Connection(
-            conn_id='beeline_default', conn_type='beeline', port="10000",
-            host='localhost', extra="{\"use_beeline\": true, \"auth\": \"\"}",
-            schema='default'))
-    merge_conn(
-        models.Connection(
-            conn_id='bigquery_default', conn_type='bigquery'))
-    merge_conn(
-        models.Connection(
-            conn_id='local_mysql', conn_type='mysql',
-            host='localhost', login='airflow', password='airflow',
-            schema='airflow'))
-    merge_conn(
-        models.Connection(
-            conn_id='presto_default', conn_type='presto',
-            host='localhost',
-            schema='hive', port=3400))
-    merge_conn(
-        models.Connection(
-            conn_id='hive_cli_default', conn_type='hive_cli',
-            schema='default',))
-    merge_conn(
-        models.Connection(
-            conn_id='hiveserver2_default', conn_type='hiveserver2',
-            host='localhost',
-            schema='default', port=10000))
-    merge_conn(
-        models.Connection(
-            conn_id='metastore_default', conn_type='hive_metastore',
-            host='localhost', extra="{\"authMechanism\": \"PLAIN\"}",
-            port=9083))
-    merge_conn(
-        models.Connection(
-            conn_id='mysql_default', conn_type='mysql',
-            login='root',
-            host='localhost'))
-    merge_conn(
-        models.Connection(
-            conn_id='postgres_default', conn_type='postgres',
-            login='postgres',
-            schema='airflow',
-            host='localhost'))
-    merge_conn(
-        models.Connection(
-            conn_id='sqlite_default', conn_type='sqlite',
-            host='/tmp/sqlite_default.db'))
-    merge_conn(
-        models.Connection(
-            conn_id='http_default', conn_type='http',
-            host='https://www.google.com/'))
-    merge_conn(
-        models.Connection(
-            conn_id='mssql_default', conn_type='mssql',
-            host='localhost', port=1433))
-    merge_conn(
-        models.Connection(
-            conn_id='vertica_default', conn_type='vertica',
-            host='localhost', port=5433))
-    merge_conn(
-        models.Connection(
-            conn_id='webhdfs_default', conn_type='hdfs',
-            host='localhost', port=50070))
-    merge_conn(
-        models.Connection(
-            conn_id='ssh_default', conn_type='ssh',
-            host='localhost'))
+    try:
+        buffer = io.open(configuration.INITDB_CONFIG, 'r', encoding='utf-8').read()
+        initdb_config = yaml.safe_load(buffer)
+    except yaml.scanner.ScannerError as ex:
+        raise AirflowException(
+            "Unable to parse {}: {}".format(configuration.INITDB_CONFIG, ex))
+
+    # Load connections
+    initdb_from_yaml(config=initdb_config.get('connections', {}),
+                     klass=models.Connection, attr='conn_id', replace=replace)
+
+    # Load pools
+    initdb_from_yaml(config=initdb_config.get('pools', {}),
+                     klass=models.Pool, attr='pool', replace=replace)
+
+    # Load variables
+    initdb_from_yaml(config=initdb_config.get('variables', {}),
+                     klass=models.Variable, attr='key', replace=replace)
 
     # Known event types
     KET = models.KnownEventType

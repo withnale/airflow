@@ -31,7 +31,7 @@ from airflow.exceptions import AirflowException
 DAGS_FOLDER = os.path.expanduser(conf.get('core', 'DAGS_FOLDER'))
 
 
-def sigint_handler(signal, frame):
+def sigint_handler(_signal, _frame):
     sys.exit(0)
 
 
@@ -530,7 +530,7 @@ def worker(args):
 
 def initdb(args):  # noqa
     print("DB: " + repr(settings.engine.url))
-    db_utils.initdb()
+    db_utils.initdb(replace=args.replace)
     print("Done.")
 
 
@@ -780,6 +780,10 @@ class CLIFactory(object):
             ("-d", "--debug"),
             "Use the server that ships with Flask in debug mode",
             "store_true"),
+        # inittdb
+        'replace': Arg(
+            ("-r", "--replace"),
+            "Replace existing static definitions if already present", "store_true"),
         # resetdb
         'yes': Arg(
             ("-y", "--yes"),
@@ -877,7 +881,7 @@ class CLIFactory(object):
         }, {
             'func': initdb,
             'help': "Initialize the metadata database",
-            'args': tuple(),
+            'args': ('replace',),
         }, {
             'func': list_dags,
             'help': "List all the DAGs",

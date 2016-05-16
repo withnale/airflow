@@ -423,6 +423,114 @@ authenticate = true
 max_threads = 2
 """
 
+DEFAULT_INITDB = """\
+---
+
+connections:
+  - conn_id: airflow_db1
+    conn_type: mysql
+    host: localhost
+    login: root
+    password: ''
+    schema: airflow
+
+  - conn_id: airflow_ci
+    conn_type: mysql
+    host: localhost
+    login: root
+    schema: airflow_ci
+
+  - conn_id: beeline_default
+    conn_type: beeline
+    port: 10000
+
+    host: localhost
+    extra: '{{ "use_beeline": true, "auth": ""}}'
+    schema: default
+
+  - conn_id: bigquery_default
+    conn_type: bigquery
+
+  - conn_id: local_mysql
+    conn_type: mysql
+    host: localhost
+    login: airflow
+    password: airflow
+    schema: airflow
+
+  - conn_id: presto_default
+    conn_type: presto
+    host: localhost
+    schema: hive
+    port: 3400
+
+  - conn_id: hive_cli_default
+    conn_type: hive_cli
+    schema: default
+
+  - conn_id: hiveserver2_default
+    conn_type: hiveserver2
+    host: localhost
+    schema: default
+    port: 10000
+
+  - conn_id: metastore_default
+    conn_type: hive_metastore
+    host: localhost
+    extra: '{{\"authMechanism\": \"PLAIN\"}}'
+    port: 9083
+
+  - conn_id: mysql_default
+    conn_type: mysql
+    login: root
+    host: localhost
+
+  - conn_id: postgres_default
+    conn_type: postgres
+    login: postgres
+    schema: airflow
+    host: localhost
+
+  - conn_id: sqlite_default
+    conn_type: sqlite
+    host: /tmp/sqlite_default.db
+
+  - conn_id: http_default
+    conn_type: http
+    host: https://www.google.com/
+
+  - conn_id: mssql_default
+    conn_type: mssql
+    host: localhost
+    port: 1433
+
+  - conn_id: vertica_default
+    conn_type: vertica
+    host: localhost
+    port: 5433
+
+  - conn_id: webhdfs_default
+    conn_type: hdfs
+    host: localhost
+    port: 50070
+
+  - conn_id: ssh_default
+    conn_type: ssh
+    host: localhost
+
+
+pools:
+  - pool: my_pool
+    slots: 3
+    description: foobar
+
+
+variables:
+  - key: my_variable1
+    _val: pootle
+    is_encrypted: false
+
+"""
 
 class ConfigParserWithDefaults(ConfigParser):
 
@@ -647,6 +755,14 @@ if not os.path.isfile(AIRFLOW_CONFIG):
         f.write(parameterized_config(DEFAULT_CONFIG))
 
 logging.info("Reading the config from " + AIRFLOW_CONFIG)
+
+
+INITDB_CONFIG = AIRFLOW_HOME + '/airflow-initdb.yaml'
+if not os.path.isfile(INITDB_CONFIG):
+    logging.info("Creating new airflow initdb configuration: " +
+                 INITDB_CONFIG)
+    with open(INITDB_CONFIG, 'w') as f:
+        f.write(parameterized_config(DEFAULT_INITDB))
 
 
 def test_mode():
