@@ -69,6 +69,9 @@ from airflow.utils.logging import LoggingMixin
 from airflow.utils.state import State
 from airflow.utils.timeout import timeout
 from airflow.utils.trigger_rule import TriggerRule
+from airflow.notifications.base import BaseNotificationHandler
+from airflow.notifications.hipchat import HipChatNotificationHandler
+
 
 Base = declarative_base()
 ID_LEN = 250
@@ -874,6 +877,15 @@ class TaskInstance(Base):
         session.merge(self)
         session.commit()
 
+    def notify(self, method_name, **kwargs):
+        for handler in self.task.notification_handlers:
+            try:
+                method = getattr(handler, method_name)
+                if method:
+                    method(task_instance=self, **kwargs)
+            except Exception as ex:
+                logging.error('Notification error: {}'.format(ex.message))
+
     def is_queueable(
             self,
             include_queued=False,
@@ -1194,13 +1206,18 @@ class TaskInstance(Base):
 
         if self.state == State.RUNNING:
             logging.warning("Another instance is running, skipping.")
+            self.notify('on_task_start', state=self.state, message="Another instance is running, skipping.")
         elif self.state == State.REMOVED:
             logging.debug("Task {} was removed from the dag".format(self))
+            self.notify('on_task_start', state=self.state, message="Task {} was removed from the dag".format(self))
         elif not force and self.state == State.SUCCESS:
             logging.info(
                 "Task {self} previously succeeded"
                 " on {self.end_date}".format(**locals())
             )
+            self.notify('on_task_start', state=self.state,
+                        message="Task {self} previously succeeded"
+                        " on {self.end_date}".format(**locals()))
             Stats.incr('previously_succeeded', 1, 1)
         elif (
                 not ignore_dependencies and
@@ -1309,6 +1326,7 @@ class TaskInstance(Base):
                 self.handle_failure(e, test_mode, context)
                 raise
 
+            self.notify('on_task_finish', state=self.state, context=context)
             # Recording SUCCESS
             self.end_date = datetime.now()
             self.set_duration()
@@ -1349,14 +1367,20 @@ class TaskInstance(Base):
             if task.retries and self.try_number % (task.retries + 1) != 0:
                 self.state = State.UP_FOR_RETRY
                 logging.info('Marking task as UP_FOR_RETRY')
+                self.notify('on_finished', state=self.state, context=context,
+                            message='Marking task as UP_FOR_RETRY')
                 if task.email_on_retry and task.email:
                     self.email_alert(error, is_retry=True)
             else:
                 self.state = State.FAILED
                 if task.retries:
                     logging.info('All retries failed; marking task as FAILED')
+                    self.notify('on_task_finish', state=self.state, context=context,
+                                message='All retries failed; marking task as FAILED')
                 else:
                     logging.info('Marking task as FAILED.')
+                    self.notify('on_task_finish', state=self.state, context=context,
+                                message='Marking task as FAILED.')
                 if task.email_on_failure and task.email:
                     self.email_alert(error, is_retry=False)
         except Exception as e2:
@@ -1758,6 +1782,7 @@ class BaseOperator(object):
             on_success_callback=None,
             on_retry_callback=None,
             trigger_rule=TriggerRule.ALL_SUCCESS,
+            notification_handlers=HipChatNotificationHandler(),
             *args,
             **kwargs):
 
@@ -1822,6 +1847,11 @@ class BaseOperator(object):
         # Private attributes
         self._upstream_task_ids = []
         self._downstream_task_ids = []
+
+        if isinstance(notification_handlers, list):
+            self.notification_handlers = notification_handlers
+        else:
+            self.notification_handlers = [notification_handlers]
 
         if not dag and _CONTEXT_MANAGER_DAG:
             dag = _CONTEXT_MANAGER_DAG
