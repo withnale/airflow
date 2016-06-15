@@ -124,6 +124,14 @@ def trigger_dag(args):
         logging.error("Cannot find dag {}".format(args.dag_id))
         sys.exit(1)
 
+    run_conf = {}
+    if args.conf:
+        run_conf = json.loads(args.conf)
+
+    if args.start_date and args.end_date:
+        dag.backfill(start_date=args.start_date, end_date=args.end_date, config=run_conf)
+        return
+
     execution_date = datetime.now()
     run_id = args.run_id or "manual__{0}".format(execution_date.isoformat())
 
@@ -132,14 +140,10 @@ def trigger_dag(args):
         logging.error("This run_id {} already exists".format(run_id))
         raise AirflowException()
 
-    run_conf = {}
-    if args.conf:
-        run_conf = json.loads(args.conf)
-
     trigger = dag.create_dagrun(
         run_id=run_id,
         execution_date=execution_date,
-        state=State.RUNNING,
+        state=State.QUEUED,
         conf=run_conf,
         external_trigger=True
     )
@@ -896,7 +900,7 @@ class CLIFactory(object):
         }, {
             'func': trigger_dag,
             'help': "Trigger a DAG run",
-            'args': ('dag_id', 'subdir', 'run_id', 'conf'),
+            'args': ('dag_id', 'subdir', 'run_id', 'conf', 'start_date', 'end_date'),
         }, {
             'func': variables,
             'help': "List all variables",

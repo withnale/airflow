@@ -2582,6 +2582,21 @@ class DAG(LoggingMixin):
 
         return dttm
 
+    def backfill(self, start_date, end_date, config={}):
+        for next_run_date in self.date_range(start_date=start_date,end_date=end_date):
+            run_id = 'scheduled__' + next_run_date.isoformat()
+            dr = DagRun.find(dag_id=self.dag_id, run_id=run_id)
+            if dr:
+                logging.info("This run_id {} already exists".format(run_id))
+                break
+            trigger = self.create_dagrun(
+                run_id=run_id,
+                execution_date=next_run_date,
+                state=State.QUEUED,
+                conf=config
+            )
+            logging.info("Created {}".format(trigger))
+
     @property
     def tasks(self):
         return list(self.task_dict.values())

@@ -393,14 +393,34 @@ class SchedulerJob(BaseJob):
                 external_trigger=False,
                 session=session
             )
-            if len(active_runs) >= dag.max_active_runs:
+            num_active_runs = len(active_runs)
+            if num_active_runs >= dag.max_active_runs:
                 return
             for dr in active_runs:
                 if (
                         dr.start_date and dag.dagrun_timeout and
                         dr.start_date < datetime.now() - dag.dagrun_timeout):
                     dr.state = State.FAILED
+                    num_active_runs -= 1
                     dr.end_date = datetime.now()
+
+
+            # If any runs are queued then
+            queued_runs = DagRun.find(
+                dag_id=dag.dag_id,
+                state=State.QUEUED,
+                external_trigger=False
+            )
+            if queued_runs:
+                for queued_run in queued_runs:
+                    queued_run.state = State.RUNNING
+                    session.merge(queued_run)
+                    num_active_runs += 1
+                    if num_active_runs == dag.max_active_runs:
+                        break
+                session.commit()
+                return None
+
             session.commit()
 
             # this query should be replaced by find dagrun

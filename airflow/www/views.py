@@ -2093,6 +2093,7 @@ class DagRunModelView(ModelViewOnly):
     form_choices = {
         'state': [
             ('success', 'success'),
+            ('queued', 'queued'),
             ('running', 'running'),
             ('failed', 'failed'),
         ],
