@@ -404,24 +404,23 @@ class SchedulerJob(BaseJob):
                     num_active_runs -= 1
                     dr.end_date = datetime.now()
 
-
             # If any runs are queued then
             queued_runs = DagRun.find(
                 dag_id=dag.dag_id,
                 state=State.QUEUED,
-                external_trigger=False
+                external_trigger=False,
+                session=session
             )
-            if queued_runs:
-                for queued_run in queued_runs:
-                    queued_run.state = State.RUNNING
-                    session.merge(queued_run)
-                    num_active_runs += 1
-                    if num_active_runs == dag.max_active_runs:
-                        break
-                session.commit()
-                return None
+            for queued_run in queued_runs:
+                queued_run.state = State.RUNNING
+                session.merge(queued_run)
+                num_active_runs += 1
+                if num_active_runs == dag.max_active_runs:
+                    break
 
             session.commit()
+            if num_active_runs == dag.max_active_runs:
+                return
 
             # this query should be replaced by find dagrun
             qry = (
